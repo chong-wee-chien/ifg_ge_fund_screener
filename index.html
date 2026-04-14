@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fund Price Chart Tool</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:#0f1117; --surface:#181c27; --surface2:#1e2335; --border:#2a3050;
+    --accent:#4f8ef7; --accent2:#38d9a9; --text:#e8eaf0; --muted:#7a84a0; --danger:#ff6b6b;
+    --chart-bg:#181c27; --grid:#2a3050;
+  }
+  :root.light {
+    --bg:#f0f2f8; --surface:#ffffff; --surface2:#eef0f7; --border:#d0d5e8;
+    --accent:#2563eb; --accent2:#059669; --text:#1a1f36; --muted:#6b7280; --danger:#dc2626;
+    --chart-bg:#ffffff; --grid:#e5e7f0;
+  }
+
+  .mode-btn {
+    padding:7px 14px; background:var(--surface2); border:1px solid var(--border);
+    color:var(--text); border-radius:8px; font-size:.8rem; font-weight:500;
+    cursor:pointer; display:flex; align-items:center; gap:6px; transition:all .2s;
+  }
+  .mode-btn:hover { border-color:var(--accent); color:var(--accent); }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif;min-height:100vh;}
+
+  .header{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 24px;display:flex;align-items:center;gap:12px;}
+  .header-icon{width:34px;height:34px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:18px;}
+  .header h1{font-size:1.05rem;font-weight:600;}
+  .header p{font-size:0.72rem;color:var(--muted);margin-top:1px;}
+
+  .container{display:flex;height:calc(100vh - 67px);}
+
+  .sidebar{width:290px;min-width:260px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;}
+  .s-sec{padding:16px;border-bottom:1px solid var(--border);}
+  .s-sec:last-child{border-bottom:none;flex:1;}
+  .s-lbl{font-size:.62rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;}
+
+  select{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:9px 32px 9px 11px;border-radius:8px;font-size:.84rem;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 24 24' fill='none' stroke='%237a84a0' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;cursor:pointer;}
+  select:focus{outline:none;border-color:var(--accent);}
+
+  .btn-add{width:100%;margin-top:9px;padding:10px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:.84rem;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:background .15s;}
+  .btn-add:hover{background:#3a7be8;}
+
+  .date-row{display:flex;gap:9px;}
+  .df{flex:1;}
+  .df label{display:block;font-size:.7rem;color:var(--muted);margin-bottom:5px;}
+  input[type=date]{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:8px 9px;border-radius:8px;font-size:.78rem;color-scheme:dark;}
+  input[type=date]:focus{outline:none;border-color:var(--accent);}
+
+  .rbns{display:flex;gap:5px;flex-wrap:wrap;margin-top:9px;}
+  .rb{padding:4px 10px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:6px;font-size:.73rem;cursor:pointer;transition:all .15s;}
+  .rb:hover{border-color:var(--accent);color:var(--accent);}
+  .rb.active{background:var(--accent);border-color:var(--accent);color:#fff;}
+
+  .flist{display:flex;flex-direction:column;gap:7px;}
+  .fi{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 11px;display:flex;align-items:center;gap:9px;animation:si .2s ease;}
+  @keyframes si{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+  .fdot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+  .fn{flex:1;font-size:.76rem;line-height:1.35;}
+  .fc{font-size:.64rem;color:var(--muted);font-family:monospace;}
+  .frem{background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:1px 4px;border-radius:4px;line-height:1;}
+  .frem:hover{color:var(--danger);background:rgba(255,107,107,.12);}
+  .empty{text-align:center;padding:16px 0;color:var(--muted);font-size:.78rem;line-height:1.5;}
+
+  .chart-area{flex:1;display:flex;flex-direction:column;padding:18px;overflow:hidden;}
+  .ctb{display:flex;justify-content:flex-end;margin-bottom:13px;}
+  .btn-dl{padding:8px 15px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;font-size:.8rem;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:6px;transition:all .15s;}
+  .btn-dl:hover{border-color:var(--accent);color:var(--accent);}
+
+  .cwrap{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;position:relative;min-height:0;}
+  #myChart{width:100%!important;height:100%!important;}
+
+  .lov{position:absolute;inset:0;background:rgba(10,12,18,.82);backdrop-filter:blur(3px);display:none;flex-direction:column;align-items:center;justify-content:center;border-radius:12px;z-index:10;gap:10px;}
+  .spin{width:28px;height:28px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:sp .75s linear infinite;}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .ltxt{font-size:.78rem;color:var(--muted);}
+
+  .nodata{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:10px;color:var(--muted);}
+  .nodata-icon{font-size:36px;opacity:.3;}
+  .nodata p{font-size:.84rem;}
+
+  .srow{display:flex;gap:9px;margin-top:11px;flex-wrap:wrap;}
+  .schip{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:7px 11px;display:flex;align-items:center;gap:7px;animation:si .3s ease;}
+  .sdot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+  .si2{display:flex;flex-direction:column;gap:1px;}
+  .sn{color:var(--muted);font-size:.65rem;}
+  .sv{font-weight:500;font-family:monospace;font-size:.78rem;}
+  .sc{font-size:.68rem;font-family:monospace;}
+  .pos{color:var(--accent2);} .neg{color:var(--danger);}
+
+  .toast{position:fixed;bottom:16px;right:16px;background:var(--surface2);border:1px solid var(--danger);color:var(--text);padding:10px 14px;border-radius:10px;font-size:.8rem;z-index:100;animation:si .3s ease;max-width:280px;}
+
+  ::-webkit-scrollbar{width:4px;} ::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-icon">📈</div>
+  <div>
+    <h1>Fund Price Chart Tool</h1>
+    <p>GreatEastern Life · NAV Price Viewer</p>
+  </div>
+</div>
+
+<div id="iframeBanner" style="display:none;background:#2a1a00;border-bottom:1px solid #fb923c;padding:10px 20px;font-size:.8rem;color:#ffd166;text-align:center;">
+  ⚠️ <strong>Open this file in Safari</strong> to load live fund data — it cannot fetch data inside Claude's viewer.
+  Download → Save to Files → tap to open in Safari.
+</div>
+
+<div class="container">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="s-sec">
+      <div class="s-lbl">Add Fund</div>
+      <select id="fundSelect"><option value="">— Select a fund —</option></select>
+      <button class="btn-add" onclick="addFund()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add to Chart
+      </button>
+    </div>
+
+    <div class="s-sec">
+      <div class="s-lbl">Date Range</div>
+      <div class="date-row">
+        <div class="df"><label>From</label><input type="date" id="fromDate"></div>
+        <div class="df"><label>To</label><input type="date" id="toDate"></div>
+      </div>
+      <div class="rbns">
+        <button class="rb" onclick="setRange(1,'y',this)">1Y</button>
+        <button class="rb" onclick="setRange(3,'y',this)">3Y</button>
+        <button class="rb" onclick="setRange(5,'y',this)">5Y</button>
+        <button class="rb" onclick="setRange(10,'y',this)">10Y</button>
+        <button class="rb" onclick="setRange(0,'max',this)">Max</button>
+      </div>
+    </div>
+
+    <div class="s-sec">
+      <div class="s-lbl">Active Funds <span id="fundCount" style="color:var(--accent)"></span></div>
+      <div class="flist" id="fundList">
+        <div class="empty">No funds added yet.<br>Select a fund above to begin.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chart -->
+  <div class="chart-area">
+    <div class="ctb">
+      <button class="mode-btn" onclick="toggleMode()" id="modeBtn">
+        ☀️ Light Mode
+      </button>
+      <button class="btn-dl" onclick="downloadChart()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download Chart
+      </button>
+    </div>
+    <div class="cwrap">
+      <canvas id="myChart"></canvas>
+      <div class="lov" id="lov">
+        <div class="spin"></div>
+        <div class="ltxt" id="ltxt">Loading…</div>
+      </div>
+      <div class="nodata" id="nodata">
+        <div class="nodata-icon">📊</div>
+        <p>Add a fund from the sidebar to view its price chart.</p>
+      </div>
+    </div>
+    <div class="srow" id="srow"></div>
+  </div>
+</div>
+
+  <pre id="debugContent" style="white-space:pre-wrap;word-break:break-all;color:#e8eaf0;margin:0;"></pre>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════
+//  FUND LIST — add more funds here: { name, code }
+//  The API URL is built automatically from the code.
+// ══════════════════════════════════════════════════════════
+const FUNDS = [
+  { name: "GreatLink ASEAN Growth Fund", code: "F0HKG07062" },
+  { name: "GreatLink Asia Dividend Advantage Fund", code: "F00001KWYI" },
+  { name: "GreatLink Asia High Dividend Equity Fund", code: "F0HKG0706J" },
+  { name: "GreatLink Asia Pacific Equity Fund", code: "F0HKG07064" },
+  { name: "GreatLink Cash Fund", code: "F0HKG07063" },
+  { name: "GreatLink China Growth Fund", code: "F0HKG07136" },
+  { name: "GreatLink Diversified Growth Portfolio", code: "F000013JGN" },
+  { name: "GreatLink Dynamic Balanced Portfolio", code: "F00001T6DG" },
+  { name: "GreatLink Dynamic Growth Portfolio", code: "F00001T6DI" },
+  { name: "GreatLink Dynamic Secure Portfolio", code: "F00001T6DE" },
+  { name: "GreatLink European Sustainable Equity Fund", code: "F0HKG07065" },
+  { name: "GreatLink Far East Ex Japan Equities Fund", code: "F0HKG07066" },
+  { name: "GreatLink Global Bond Fund", code: "F0HKG07067" },
+  { name: "GreatLink Global Disruptive Innovation Fund", code: "F00001DUL4" },
+  { name: "GreatLink Global Emerging Markets Equity Fund", code: "F00000PM36" },
+  { name: "GreatLink Global Equity Alpha Fund", code: "F0HKG07069" },
+  { name: "GreatLink Global Equity Fund", code: "F0HKG07068" },
+  { name: "GreatLink Global Perspective Fund", code: "F0HKG0706D" },
+  { name: "GreatLink Global Real Estate Securities Fund", code: "F0HKG070AN" },
+  { name: "GreatLink Global Supreme Fund", code: "F0HKG0706B" },
+  { name: "GreatLink Global Technology Fund", code: "F0HKG0706C" },
+  { name: "GreatLink Income Bond Fund", code: "F000016LHO" },
+  { name: "GreatLink Income Focus Fund", code: "F000000J3P" },
+  { name: "GreatLink International Health Care Fund", code: "F00001DQQX" },
+  { name: "GreatLink Lifestyle Balanced Portfolio", code: "F0HKG0706E" },
+  { name: "GreatLink Lifestyle Dynamic Portfolio", code: "F0HKG0706F" },
+  { name: "GreatLink Lifestyle Progressive Portfolio", code: "F0HKG0706G" },
+  { name: "GreatLink Lifestyle Secure Portfolio", code: "F0HKG0706H" },
+  { name: "GreatLink Lifestyle Steady Portfolio", code: "F0HKG0706I" },
+  { name: "GreatLink Lion Asian Balanced Fund", code: "F000001EUM" },
+  { name: "GreatLink Lion India Fund", code: "F0HKG07137" },
+  { name: "GreatLink Lion Japan Growth Fund", code: "F0HKG07135" },
+  { name: "GreatLink Lion Vietnam Fund", code: "F000001EUN" },
+  { name: "GreatLink Multi-Sector Income Fund", code: "F00001KWYJ" },
+  { name: "GreatLink Multi-Theme Equity Fund", code: "F0000169CN" },
+  { name: "GreatLink Short Duration Bond Fund", code: "F0HKG0706L" },
+  { name: "GreatLink Singapore Equities Fund", code: "F0HKG0706K" },
+  { name: "GreatLink Singapore Physical Gold Fund", code: "F00001TBVK" },
+  { name: "GreatLink Sustainable Global Thematic Fund", code: "F0HKG070IG" },
+  { name: "GreatLink US Income and Growth Fund (Dis)", code: "F00001FPDX" },
+  // { name: "New Fund Name", code: "FUNDCODE" },
+];
+
+const DIRECT_API = (code, from, to) =>
+  `https://ge-fundcentersg.newwealth.cloud/fund-center-api/api/v2/timeseries` +
+  `?code=${code}&currency_id=BAS&id_type=sec_id&from_date=${from}&to_date=${to}` +
+  `&ts_type=nav&start_value=100&maximum=false`;
+
+// CORS proxies tried in order if direct call fails
+const PROXIES = [
+  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+];
+
+async function fetchWithFallback(code, from, to) {
+  const targetUrl = DIRECT_API(code, from, to);
+  // Try direct first
+  const attempts = [() => fetch(targetUrl), ...PROXIES.map(p => () => fetch(p(targetUrl)))];
+  let lastErr;
+  for (const attempt of attempts) {
+    try {
+      const resp = await attempt();
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return await resp.json();
+    } catch(e) { lastErr = e; }
+  }
+  throw lastErr;
+}
+
+const COLORS = [
+  '#4f8ef7', // blue
+  '#ff6b6b', // red
+  '#2ecc71', // green
+  '#ffd166', // yellow
+  '#c084fc', // purple
+  '#fb923c', // orange
+  '#00cec9', // teal
+  '#fd79a8', // pink
+  '#a29bfe', // lavender
+  '#55efc4', // mint
+  '#e17055', // salmon
+  '#74b9ff', // sky blue
+  '#fdcb6e', // amber
+  '#6c5ce7', // indigo
+  '#00b894', // emerald
+  '#d63031', // crimson
+];
+
+let chart = null, activeFunds = [], colorIdx = 0;
+
+// ── Date helpers ─────────────────────────────────────────
+function fmtDate(d){ return d.toISOString().split('T')[0]; }
+function fmtLabel(dateStr){
+  // Returns "Apr 2025" style label
+  const d = new Date(dateStr);
+  return d.toLocaleDateString('en-GB',{month:'short',year:'numeric'});
+}
+
+// ── Boot ─────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  // Show warning if running inside an iframe (Claude viewer)
+  if (window.self !== window.top) {
+    document.getElementById('iframeBanner').style.display = 'block';
+  }
+  const sel = document.getElementById('fundSelect');
+  FUNDS.forEach(f => {
+    const o = document.createElement('option');
+    o.value = f.code; o.textContent = f.name; sel.appendChild(o);
+  });
+  const today = new Date(), from = new Date(today);
+  from.setFullYear(today.getFullYear() - 1);
+  document.getElementById('toDate').value   = fmtDate(today);
+  document.getElementById('fromDate').value = fmtDate(from);
+
+  ['fromDate','toDate'].forEach(id =>
+    document.getElementById(id).addEventListener('change', refreshAll)
+  );
+  initChart();
+});
+
+// ── Quick range buttons ───────────────────────────────────
+function setRange(n, unit, btn) {
+  document.querySelectorAll('.rb').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const today = new Date(), from = (unit==='max') ? new Date('1990-01-01') : new Date(today);
+  if (unit==='y') from.setFullYear(today.getFullYear() - n);
+  document.getElementById('fromDate').value = fmtDate(from);
+  document.getElementById('toDate').value   = fmtDate(today);
+  refreshAll();
+}
+
+// ── Chart init (NO time scale — uses category labels) ────
+function initChart() {
+  const ctx = document.getElementById('myChart').getContext('2d');
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: [], datasets: [] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          display: true, position: 'top',
+          labels: { color:'#e8eaf0', font:{size:12}, usePointStyle:true, pointStyleWidth:8, padding:18 }
+        },
+        tooltip: {
+          backgroundColor:'#1e2335', borderColor:'#2a3050', borderWidth:1,
+          titleColor:'#7a84a0', bodyColor:'#e8eaf0', padding:12,
+          callbacks: {
+            title: items => {
+              // Find the actual date from the allDates array using the data index
+              if (window._allDates && items[0]) {
+                const d = new Date(window._allDates[items[0].dataIndex]);
+                return d.toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' });
+              }
+              return items[0]?.label || '';
+            },
+            label: i => `  ${i.dataset.label}: ${parseFloat(i.raw).toFixed(4)}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color:'#2a3050' },
+          ticks: {
+            color:'#7a84a0', font:{size:10}, maxTicksLimit:50,
+            maxRotation: 45, minRotation: 0,
+          }
+        },
+        y: {
+          grid: { color:'#2a3050' },
+          ticks: { color:'#7a84a0', font:{size:10}, callback: v => v.toFixed(3) }
+        }
+      },
+      elements: { line:{ borderWidth:2, tension:0.15 }, point:{ radius:0, hoverRadius:5 } }
+    }
+  });
+}
+
+// ── Add fund ──────────────────────────────────────────────
+async function addFund() {
+  const code = document.getElementById('fundSelect').value;
+  if (!code) return;
+  if (activeFunds.find(f => f.code === code)) { showToast('Already on chart.'); return; }
+  const fund  = FUNDS.find(f => f.code === code);
+  const color = COLORS[colorIdx++ % COLORS.length];
+  const entry = { code, name: fund.name, color, dates:[], values:[] };
+  activeFunds.push(entry);
+  renderFundList();
+  await fetchAndPlot(entry);
+}
+
+// ── Remove fund ───────────────────────────────────────────
+function removeFund(code) {
+  activeFunds = activeFunds.filter(f => f.code !== code);
+  rebuildChart();
+  renderFundList();
+  renderStats();
+  if (!activeFunds.length) document.getElementById('nodata').style.display = 'flex';
+}
+
+// ── Fetch data ────────────────────────────────────────────
+async function fetchAndPlot(entry) {
+  document.getElementById('nodata').style.display = 'none';
+  const lov = document.getElementById('lov');
+  lov.style.display = 'flex';
+  document.getElementById('ltxt').textContent = `Loading ${entry.name}…`;
+
+  const from = document.getElementById('fromDate').value;
+  const to   = document.getElementById('toDate').value;
+
+  try {
+    const json = await fetchWithFallback(entry.code, from, to);
+
+    // Parse: json.TimeSeries.Security[].HistoryDetail[{EndDate, Value}]
+    let raw = [];
+    if (json.TimeSeries && json.TimeSeries.Security) {
+      const securities = Array.isArray(json.TimeSeries.Security)
+        ? json.TimeSeries.Security : [json.TimeSeries.Security];
+      securities.forEach(sec => {
+        if (Array.isArray(sec.HistoryDetail)) raw = raw.concat(sec.HistoryDetail);
+      });
+    } else if (Array.isArray(json)) {
+      raw = json;
+    } else {
+      for (const key of Object.keys(json)) {
+        if (Array.isArray(json[key]) && json[key].length > 0) { raw = json[key]; break; }
+      }
+    }
+
+    entry.dates  = [];
+    entry.values = [];
+    raw.forEach(d => {
+      const dateStr = d.EndDate ?? d.date ?? d.Date ?? d.t ?? d[0] ?? '';
+      const val = parseFloat(d.Value ?? d.value ?? d.nav ?? d.v ?? d[1] ?? 'NaN');
+      if (dateStr && !isNaN(val)) {
+        entry.dates.push(String(dateStr).slice(0, 10));
+        entry.values.push(val);
+      }
+    });
+
+    rebuildChart();
+    renderStats();
+
+  } catch(e) {
+    showToast(`❌ Cannot load data. Please open this file directly in Safari (save to Files app first), not inside Claude.`);
+    activeFunds = activeFunds.filter(f => f.code !== entry.code);
+    renderFundList();
+    if (!activeFunds.length) document.getElementById('nodata').style.display = 'flex';
+  } finally {
+    lov.style.display = 'none';
+  }
+}
+
+// ── Rebuild chart with merged date labels ─────────────────
+function rebuildChart() {
+  if (!activeFunds.length) return;
+
+  // Build a unified sorted date set across all funds
+  const allDates = [...new Set(activeFunds.flatMap(f => f.dates))].sort();
+  window._allDates = allDates; // expose for tooltip
+
+  // Show a label every ~30 days (roughly monthly), regardless of range
+  const totalDays = allDates.length;
+  const targetLabels = Math.max(12, Math.min(40, Math.floor(totalDays / 30)));
+  const step = Math.max(1, Math.floor(totalDays / targetLabels));
+  const labels = allDates.map((d, i) => (i % step === 0) ? fmtLabel(d) : '');
+
+  chart.data.labels   = labels;
+  chart.data.datasets = activeFunds.map(f => {
+    // Align each fund's values to the unified date array
+    const dateIndex = Object.fromEntries(f.dates.map((d,i) => [d,i]));
+    const aligned   = allDates.map(d => {
+      const i = dateIndex[d];
+      return (i !== undefined) ? f.values[i] : null;
+    });
+    return {
+      label: f.name,
+      data: aligned,
+      borderColor: f.color,
+      backgroundColor: f.color + '14',
+      fill: false,
+      spanGaps: true,
+      pointBackgroundColor: f.color,
+    };
+  });
+  chart.update();
+}
+
+async function refreshAll() {
+  for (const e of activeFunds) await fetchAndPlot(e);
+}
+
+// ── Stats bar ─────────────────────────────────────────────
+function renderStats() {
+  const row = document.getElementById('srow');
+  row.innerHTML = '';
+  activeFunds.forEach(f => {
+    if (!f.values.length) return;
+    const first = f.values[0], last = f.values[f.values.length-1];
+    const chg   = (last - first) / first * 100;
+    const cls   = chg >= 0 ? 'pos' : 'neg';
+    const sign  = chg >= 0 ? '+' : '';
+    const chip  = document.createElement('div');
+    chip.className = 'schip';
+    chip.innerHTML = `
+      <div class="sdot" style="background:${f.color}"></div>
+      <div class="si2">
+        <span class="sn">${f.name.replace('GreatLink ','')}</span>
+        <span class="sv">${last.toFixed(4)} <span class="sc ${cls}">${sign}${chg.toFixed(2)}%</span></span>
+      </div>`;
+    row.appendChild(chip);
+  });
+}
+
+// ── Fund list sidebar ─────────────────────────────────────
+function renderFundList() {
+  const list = document.getElementById('fundList');
+  document.getElementById('fundCount').textContent = activeFunds.length ? `(${activeFunds.length})` : '';
+  if (!activeFunds.length) {
+    list.innerHTML = '<div class="empty">No funds added yet.<br>Select a fund above to begin.</div>';
+    return;
+  }
+  list.innerHTML = '';
+  activeFunds.forEach(f => {
+    const item = document.createElement('div');
+    item.className = 'fi';
+    item.innerHTML = `
+      <div class="fdot" style="background:${f.color}"></div>
+      <div class="fn">${f.name}<div class="fc">${f.code}</div></div>
+      <button class="frem" onclick="removeFund('${f.code}')" title="Remove">×</button>`;
+    list.appendChild(item);
+  });
+}
+
+// ── Download ──────────────────────────────────────────────
+function downloadChart() {
+  const canvas = document.getElementById('myChart');
+  const isLight = document.documentElement.classList.contains('light');
+
+  // Temporarily set chart background to match current mode
+  const bgColor = isLight ? '#ffffff' : '#181c27';
+
+  const tmp = document.createElement('canvas');
+  tmp.width = canvas.width; tmp.height = canvas.height;
+  const c = tmp.getContext('2d');
+  c.fillStyle = bgColor;
+  c.fillRect(0, 0, tmp.width, tmp.height);
+  c.drawImage(canvas, 0, 0);
+
+  const a = document.createElement('a');
+  a.download = `fund_chart_${document.getElementById('fromDate').value}_${document.getElementById('toDate').value}.png`;
+  a.href = tmp.toDataURL('image/png'); a.click();
+}
+
+// ── Toast ─────────────────────────────────────────────────
+
+function toggleMode() {
+  const root = document.documentElement;
+  const isLight = root.classList.toggle('light');
+  document.getElementById('modeBtn').textContent = isLight ? '🌙 Dark Mode' : '☀️ Light Mode';
+
+  // Update chart colors for new mode
+  const gridColor  = isLight ? '#e5e7f0' : '#2a3050';
+  const tickColor  = isLight ? '#6b7280' : '#7a84a0';
+  const textColor  = isLight ? '#1a1f36' : '#e8eaf0';
+  const bgColor    = isLight ? '#ffffff' : '#181c27';
+  const tooltipBg  = isLight ? '#ffffff' : '#1e2335';
+  const tooltipBdr = isLight ? '#d0d5e8' : '#2a3050';
+  const tooltipTtl = isLight ? '#6b7280' : '#7a84a0';
+  const tooltipBdy = isLight ? '#1a1f36' : '#e8eaf0';
+
+  chart.options.scales.x.grid.color = gridColor;
+  chart.options.scales.y.grid.color = gridColor;
+  chart.options.scales.x.ticks.color = tickColor;
+  chart.options.scales.y.ticks.color = tickColor;
+  chart.options.plugins.legend.labels.color = textColor;
+  chart.options.plugins.tooltip.backgroundColor = tooltipBg;
+  chart.options.plugins.tooltip.borderColor = tooltipBdr;
+  chart.options.plugins.tooltip.titleColor = tooltipTtl;
+  chart.options.plugins.tooltip.bodyColor = tooltipBdy;
+  chart.update();
+}
+
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t); setTimeout(() => t.remove(), 4500);
+}
+</script>
+</body>
+</html>
