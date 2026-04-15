@@ -17,6 +17,17 @@
     --chart-bg:#ffffff; --grid:#e5e7f0;
   }
 
+  .tgl-group {
+    display:flex; border:1px solid var(--border); border-radius:8px; overflow:hidden;
+  }
+  .tgl-btn {
+    padding:7px 15px; background:var(--surface2); border:none; border-right:1px solid var(--border);
+    color:var(--muted); font-size:.8rem; font-weight:500; cursor:pointer; transition:all .2s;
+  }
+  .tgl-btn:last-child { border-right:none; }
+  .tgl-btn:hover { color:var(--accent); }
+  .tgl-btn.tgl-active { background:var(--accent); color:#fff; }
+
   .mode-btn {
     padding:7px 14px; background:var(--surface2); border:1px solid var(--border);
     color:var(--text); border-radius:8px; font-size:.8rem; font-weight:500;
@@ -149,6 +160,10 @@
   <!-- Chart -->
   <div class="chart-area">
     <div class="ctb">
+      <div class="tgl-group">
+        <button class="tgl-btn tgl-active" id="btnNav" onclick="setChartMode('nav')">NAV Price</button>
+        <button class="tgl-btn" id="btnReturn" onclick="setChartMode('return')">Return</button>
+      </div>
       <button class="mode-btn" onclick="toggleMode()" id="modeBtn">
         ☀️ Light Mode
       </button>
@@ -224,10 +239,17 @@ const FUNDS = [
   // { name: "New Fund Name", code: "FUNDCODE" },
 ];
 
-const DIRECT_API = (code, from, to) =>
-  `https://ge-fundcentersg.newwealth.cloud/fund-center-api/api/v2/timeseries` +
-  `?code=${code}&currency_id=BAS&id_type=sec_id&from_date=${from}&to_date=${to}` +
-  `&ts_type=nav&start_value=100&maximum=false`;
+// chartMode: 'nav' = NAV price,  'return' = cumulative return %
+let chartMode = 'nav';
+
+const DIRECT_API = (code, from, to, mode) => {
+  mode = mode || chartMode;
+  const tsType     = (mode === 'return') ? 'ts'  : 'nav';
+  const startValue = (mode === 'return') ? '100' : '100';
+  return `https://ge-fundcentersg.newwealth.cloud/fund-center-api/api/v2/timeseries` +
+    `?code=${code}&currency_id=BAS&id_type=sec_id&from_date=${from}&to_date=${to}` +
+    `&ts_type=${tsType}&start_value=${startValue}&maximum=false`;
+};
 
 // CORS proxies tried in order if direct call fails
 const PROXIES = [
@@ -235,8 +257,8 @@ const PROXIES = [
   url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
 ];
 
-async function fetchWithFallback(code, from, to) {
-  const targetUrl = DIRECT_API(code, from, to);
+async function fetchWithFallback(code, from, to, mode) {
+  const targetUrl = DIRECT_API(code, from, to, mode);
   // Try direct first
   const attempts = [() => fetch(targetUrl), ...PROXIES.map(p => () => fetch(p(targetUrl)))];
   let lastErr;
@@ -339,7 +361,10 @@ function initChart() {
               }
               return items[0]?.label || '';
             },
-            label: i => `  ${i.dataset.label}: ${parseFloat(i.raw).toFixed(4)}`
+            label: i => {
+              const val = parseFloat(i.raw);
+              return `  ${i.dataset.label}: ${val.toFixed(4)}`;
+            }
           }
         }
       },
@@ -394,7 +419,7 @@ async function fetchAndPlot(entry) {
   const to   = document.getElementById('toDate').value;
 
   try {
-    const json = await fetchWithFallback(entry.code, from, to);
+    const json = await fetchWithFallback(entry.code, from, to, chartMode);
 
     // Parse: json.TimeSeries.Security[].HistoryDetail[{EndDate, Value}]
     let raw = [];
@@ -564,6 +589,17 @@ function toggleMode() {
   chart.options.plugins.tooltip.titleColor = tooltipTtl;
   chart.options.plugins.tooltip.bodyColor = tooltipBdy;
   chart.update();
+}
+
+async function setChartMode(mode) {
+  if (chartMode === mode) return;
+  chartMode = mode;
+  document.getElementById('btnNav').classList.toggle('tgl-active', mode === 'nav');
+  document.getElementById('btnReturn').classList.toggle('tgl-active', mode === 'return');
+  // Update y-axis label
+  chart.options.scales.y.title = { display: false };
+  // Re-fetch all active funds with new mode
+  await refreshAll();
 }
 
 function showToast(msg) {
