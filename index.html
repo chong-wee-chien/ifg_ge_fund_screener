@@ -60,6 +60,7 @@
   .df label{display:block;font-size:.7rem;color:var(--muted);margin-bottom:5px;}
   input[type=date]{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:8px 9px;border-radius:8px;font-size:.78rem;color-scheme:dark;}
   input[type=date]:focus{outline:none;border-color:var(--accent);}
+  #avKey:focus{border-color:var(--accent) !important;}
 
   .rbns{display:flex;gap:5px;flex-wrap:wrap;margin-top:9px;}
   .rb{padding:4px 10px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:6px;font-size:.73rem;cursor:pointer;transition:all .15s;}
@@ -146,6 +147,19 @@
         <button class="rb" onclick="setRange(5,'y',this)">5Y</button>
         <button class="rb" onclick="setRange(10,'y',this)">10Y</button>
         <button class="rb" onclick="setRange(0,'max',this)">Max</button>
+      </div>
+    </div>
+
+    <div class="s-sec">
+      <div class="s-lbl">Index API Key (FRED)
+        <a href="https://fredaccount.stlouisfed.org/apikeys" target="_blank"
+           style="color:var(--accent);font-size:.65rem;margin-left:6px;text-decoration:none;">Get free key ↗</a>
+      </div>
+      <input type="text" id="fredKey" value="ba29b8cb3ee66309436f63b87af71428" placeholder="FRED API key"
+        style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);
+               padding:8px 10px;border-radius:8px;font-size:.78rem;outline:none;font-family:monospace;">
+      <div style="font-size:.67rem;color:var(--muted);margin-top:5px;">
+        Free forever · No credit card · Sign up at fred.stlouisfed.org
       </div>
     </div>
 
@@ -237,6 +251,9 @@ const FUNDS = [
   { name: "GreatLink Sustainable Global Thematic Fund", code: "F0HKG070IG" },
   { name: "GreatLink US Income and Growth Fund (Dis)", code: "F00001FPDX" },
   // { name: "New Fund Name", code: "FUNDCODE" },
+  // ── Market Indices (Yahoo Finance) ──
+  { name: "S&P 500",     code: "SP500",    type: "fred" },
+  { name: "Nasdaq Comp", code: "NASDAQCOM", type: "fred" },
 ];
 
 // chartMode: 'nav' = NAV price,  'return' = cumulative return %
@@ -251,11 +268,70 @@ const DIRECT_API = (code, from, to, mode) => {
     `&ts_type=${tsType}&start_value=${startValue}&maximum=false`;
 };
 
+// Stooq URL builder (for S&P 500, Nasdaq etc) — free, no API key
+function FRED_API(seriesId, from, to) {
+  const key = document.getElementById('fredKey').value.trim();
+  if (!key) return null;
+  return `https://api.stlouisfed.org/fred/series/observations` +
+    `?series_id=${seriesId}&api_key=${key}&file_type=json` +
+    `&observation_start=${from}&observation_end=${to}&sort_order=asc`;
+}
+
 // CORS proxies tried in order if direct call fails
 const PROXIES = [
-  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
   url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+  url => `https://thingproxy.freeboard.io/fetch/${url}`,
 ];
+
+async function fetchFRED(seriesId, from, to) {
+  const url = FRED_API(seriesId, from, to);
+  if (!url) {
+    showToast('Please enter your free FRED API key in the sidebar.');
+    return { dates: [], values: [] };
+  }
+
+  // Try direct first (works from GitHub Pages), then proxies as fallback
+  const attempts = [
+    () => fetch(url),
+    () => fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`),
+    () => fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`),
+    () => fetch(`https://thingproxy.freeboard.io/fetch/${url}`),
+  ];
+
+  let lastErr;
+  for (let i = 0; i < attempts.length; i++) {
+    console.log(`[FRED] Attempt ${i+1}`);
+    try {
+      const resp = await attempts[i]();
+      console.log(`[FRED] Status:`, resp.status);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const text = await resp.text();
+      console.log('[FRED] Raw (first 300):', text.slice(0, 300));
+      const json = JSON.parse(text);
+      if (!json.observations) throw new Error('No observations. Keys: ' + Object.keys(json));
+      let dates = [], values = [];
+      json.observations.forEach(o => {
+        const val = parseFloat(o.value);
+        if (o.value !== '.' && !isNaN(val)) {
+          dates.push(o.date);
+          values.push(val);
+        }
+      });
+      console.log(`[FRED] Parsed ${dates.length} points. First: ${dates[0]} = ${values[0]}`);
+      if (chartMode === 'return' && values.length) {
+        const base = values[0];
+        values = values.map(v => (v / base) * 100);
+      }
+      return { dates, values };
+    } catch(e) {
+      console.warn(`[FRED] Attempt ${i+1} failed:`, e.message);
+      lastErr = e;
+    }
+  }
+  throw lastErr;
+}
+
 
 async function fetchWithFallback(code, from, to, mode) {
   const targetUrl = DIRECT_API(code, from, to, mode);
@@ -372,8 +448,19 @@ function initChart() {
         x: {
           grid: { color:'#2a3050' },
           ticks: {
-            color:'#7a84a0', font:{size:10}, maxTicksLimit:50,
+            color:'#7a84a0', font:{size:10},
             maxRotation: 45, minRotation: 0,
+            autoSkip: false,
+            callback: function(val, index) {
+              const dates = window._allDates;
+              if (!dates || !dates[index]) return '';
+              const total = dates.length;
+              const step  = Math.max(1, Math.floor(total / 20));
+              if (index === 0 || index === total - 1 || index % step === 0) {
+                return fmtLabel(dates[index]);
+              }
+              return '';
+            }
           }
         },
         y: {
@@ -419,7 +506,17 @@ async function fetchAndPlot(entry) {
   const to   = document.getElementById('toDate').value;
 
   try {
-    const json = await fetchWithFallback(entry.code, from, to, chartMode);
+    const fund = FUNDS.find(f => f.code === entry.code);
+    let parsedDates, parsedValues;
+
+    if (fund && fund.type === 'fred') {
+      // FRED path
+      const result = await fetchFRED(entry.code, from, to);
+      parsedDates  = result.dates;
+      parsedValues = result.values;
+    } else {
+      // GreatEastern path
+      const json = await fetchWithFallback(entry.code, from, to, chartMode);
 
     // Parse: json.TimeSeries.Security[].HistoryDetail[{EndDate, Value}]
     let raw = [];
@@ -437,16 +534,22 @@ async function fetchAndPlot(entry) {
       }
     }
 
-    entry.dates  = [];
-    entry.values = [];
-    raw.forEach(d => {
-      const dateStr = d.EndDate ?? d.date ?? d.Date ?? d.t ?? d[0] ?? '';
-      const val = parseFloat(d.Value ?? d.value ?? d.nav ?? d.v ?? d[1] ?? 'NaN');
-      if (dateStr && !isNaN(val)) {
-        entry.dates.push(String(dateStr).slice(0, 10));
-        entry.values.push(val);
-      }
-    });
+      entry.dates  = [];
+      entry.values = [];
+      raw.forEach(d => {
+        const dateStr = d.EndDate ?? d.date ?? d.Date ?? d.t ?? d[0] ?? '';
+        const val = parseFloat(d.Value ?? d.value ?? d.nav ?? d.v ?? d[1] ?? 'NaN');
+        if (dateStr && !isNaN(val)) {
+          entry.dates.push(String(dateStr).slice(0, 10));
+          entry.values.push(val);
+        }
+      });
+      parsedDates  = entry.dates;
+      parsedValues = entry.values;
+    } // end else GreatEastern
+
+    entry.dates  = parsedDates  || [];
+    entry.values = parsedValues || [];
 
     rebuildChart();
     renderStats();
@@ -465,23 +568,32 @@ async function fetchAndPlot(entry) {
 function rebuildChart() {
   if (!activeFunds.length) return;
 
-  // Build a unified sorted date set across all funds
-  const allDates = [...new Set(activeFunds.flatMap(f => f.dates))].sort();
-  window._allDates = allDates; // expose for tooltip
+  // Always use the UNION of all dates from all funds as master timeline
+  // This ensures the full range is always shown regardless of fund type
+  const masterDates = [...new Set(activeFunds.flatMap(f => f.dates))].sort();
+  window._allDates  = masterDates;
 
-  // Show a label every ~30 days (roughly monthly), regardless of range
-  const totalDays = allDates.length;
-  const targetLabels = Math.max(12, Math.min(40, Math.floor(totalDays / 30)));
-  const step = Math.max(1, Math.floor(totalDays / targetLabels));
-  const labels = allDates.map((d, i) => (i % step === 0) ? fmtLabel(d) : '');
+  // Build a fast lookup: dateString → index in masterDates
+  const masterIndex = Object.fromEntries(masterDates.map((d,i) => [d,i]));
 
-  chart.data.labels   = labels;
+  chart.data.labels   = masterDates;
   chart.data.datasets = activeFunds.map(f => {
-    // Align each fund's values to the unified date array
-    const dateIndex = Object.fromEntries(f.dates.map((d,i) => [d,i]));
-    const aligned   = allDates.map(d => {
-      const i = dateIndex[d];
-      return (i !== undefined) ? f.values[i] : null;
+    // For each fund, snap its dates to the nearest master date (within 7 days)
+    const aligned = new Array(masterDates.length).fill(null);
+    f.dates.forEach((d, i) => {
+      // Try exact match first
+      if (masterIndex[d] !== undefined) {
+        aligned[masterIndex[d]] = f.values[i];
+      } else {
+        // Find nearest master date within 7 days
+        const t = new Date(d).getTime();
+        let bestIdx = -1, bestDiff = Infinity;
+        for (let mi = 0; mi < masterDates.length; mi++) {
+          const diff = Math.abs(new Date(masterDates[mi]).getTime() - t);
+          if (diff < bestDiff && diff <= 7 * 86400000) { bestDiff = diff; bestIdx = mi; }
+        }
+        if (bestIdx >= 0 && aligned[bestIdx] === null) aligned[bestIdx] = f.values[i];
+      }
     });
     return {
       label: f.name,
