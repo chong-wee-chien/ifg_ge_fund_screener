@@ -151,15 +151,10 @@
     </div>
 
     <div class="s-sec">
-      <div class="s-lbl">Index API Key (FRED)
-        <a href="https://fredaccount.stlouisfed.org/apikeys" target="_blank"
-           style="color:var(--accent);font-size:.65rem;margin-left:6px;text-decoration:none;">Get free key ↗</a>
-      </div>
-      <input type="text" id="fredKey" value="ba29b8cb3ee66309436f63b87af71428" placeholder="FRED API key"
-        style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);
-               padding:8px 10px;border-radius:8px;font-size:.78rem;outline:none;font-family:monospace;">
-      <div style="font-size:.67rem;color:var(--muted);margin-top:5px;">
-        Free forever · No credit card · Sign up at fred.stlouisfed.org
+      <div class="s-lbl">Market indices</div>
+      <div style="font-size:.7rem;color:var(--muted);line-height:1.5;">
+        S&amp;P 500 and Nasdaq Composite index levels are sourced from FRED (daily close).
+        Availability depends on the data provider.
       </div>
     </div>
 
@@ -251,7 +246,7 @@ const FUNDS = [
   { name: "GreatLink Singapore Physical Gold Fund", code: "F00001TBVK" },
   { name: "GreatLink US Income and Growth Fund (Dis)", code: "F00001FPDX" },
   // { name: "New Fund Name", code: "FUNDCODE" },
-  // ── Market Indices (Yahoo Finance) ──
+  // ── Market Indices (FRED) ──
   { name: "S&P 500",     code: "SP500",    type: "fred" },
   { name: "Nasdaq Comp", code: "NASDAQCOM", type: "fred" },
 ];
@@ -268,70 +263,62 @@ const DIRECT_API = (code, from, to, mode) => {
     `&ts_type=${tsType}&start_value=${startValue}&maximum=false`;
 };
 
-// Stooq URL builder (for S&P 500, Nasdaq etc) — free, no API key
-function FRED_API(seriesId, from, to) {
-  const key = document.getElementById('fredKey').value.trim();
-  if (!key) return null;
-  return `https://api.stlouisfed.org/fred/series/observations` +
-    `?series_id=${seriesId}&api_key=${key}&file_type=json` +
-    `&observation_start=${from}&observation_end=${to}&sort_order=asc`;
-}
-
-// CORS proxies tried in order if direct call fails
+// FRED's keyless public graph CSV endpoint avoids exposing API keys in browser code.
+// Requests are routed through CORS-enabled intermediaries because the FRED site
+// does not consistently allow direct cross-origin browser requests.
 const PROXIES = [
+  url => `https://proxy.cors.dev/${url}`,
   url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
-  url => `https://thingproxy.freeboard.io/fetch/${url}`,
+  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
 ];
 
-async function fetchFRED(seriesId, from, to) {
-  const url = FRED_API(seriesId, from, to);
-  if (!url) {
-    showToast('Please enter your free FRED API key in the sidebar.');
-    return { dates: [], values: [] };
+function parseFredCsv(text, seriesId, from, to) {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2 || !lines[0].includes(seriesId)) {
+    throw new Error('FRED returned invalid or unavailable CSV data');
   }
-
-  // Try direct first (works from GitHub Pages), then proxies as fallback
-  const attempts = [
-    () => fetch(url),
-    () => fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`),
-    () => fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`),
-    () => fetch(`https://thingproxy.freeboard.io/fetch/${url}`),
-  ];
-
-  let lastErr;
-  for (let i = 0; i < attempts.length; i++) {
-    console.log(`[FRED] Attempt ${i+1}`);
-    try {
-      const resp = await attempts[i]();
-      console.log(`[FRED] Status:`, resp.status);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const text = await resp.text();
-      console.log('[FRED] Raw (first 300):', text.slice(0, 300));
-      const json = JSON.parse(text);
-      if (!json.observations) throw new Error('No observations. Keys: ' + Object.keys(json));
-      let dates = [], values = [];
-      json.observations.forEach(o => {
-        const val = parseFloat(o.value);
-        if (o.value !== '.' && !isNaN(val)) {
-          dates.push(o.date);
-          values.push(val);
-        }
-      });
-      console.log(`[FRED] Parsed ${dates.length} points. First: ${dates[0]} = ${values[0]}`);
-      if (chartMode === 'return' && values.length) {
-        const base = values[0];
-        values = values.map(v => (v / base) * 100);
-      }
-      return { dates, values };
-    } catch(e) {
-      console.warn(`[FRED] Attempt ${i+1} failed:`, e.message);
-      lastErr = e;
-    }
+  const dates = [], values = [];
+  for (const line of lines.slice(1)) {
+    const [date, raw] = line.split(',');
+    const value = Number(raw);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '') ||
+        date < from || date > to ||
+        !raw || raw === '.' || !Number.isFinite(value)) continue;
+    dates.push(date);
+    values.push(value);
   }
-  throw lastErr;
+  if (!values.length) throw new Error('No index observations for the selected date range');
+  if (chartMode === 'return') {
+    const base = values[0];
+    if (!base) throw new Error('Invalid starting index value');
+    return { dates, values: values.map(v => v / base * 100) };
+  }
+  return { dates, values };
 }
 
+async function fetchFRED(seriesId, from, to) {
+  const csv = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${encodeURIComponent(seriesId)}&cosd=${from}&coed=${to}`;
+  const attempts = [csv, ...PROXIES.map(proxy => proxy(csv))];
+  const errors = [];
+  for (const url of attempts) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 12000);
+      let response;
+      try {
+        response = await fetch(url, { signal: controller.signal, cache: 'no-store' });
+      } finally {
+        clearTimeout(timeout);
+      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return parseFredCsv(await response.text(), seriesId, from, to);
+    } catch (error) {
+      errors.push(error.message);
+      console.warn('[FRED]', seriesId, url, error.message);
+    }
+  }
+  throw new Error(`FRED index data unavailable: ${errors.join('; ')}`);
+}
 
 async function fetchWithFallback(code, from, to, mode) {
   const targetUrl = DIRECT_API(code, from, to, mode);
@@ -555,7 +542,8 @@ async function fetchAndPlot(entry) {
     renderStats();
 
   } catch(e) {
-    showToast(`❌ Cannot load data. Please open this file directly in Safari (save to Files app first), not inside Claude.`);
+    console.error(`[Data fetch] ${entry.name}:`, e);
+    showToast(`❌ ${entry.name}: ${e.message}`);
     activeFunds = activeFunds.filter(f => f.code !== entry.code);
     renderFundList();
     if (!activeFunds.length) document.getElementById('nodata').style.display = 'flex';
